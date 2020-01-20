@@ -94,11 +94,11 @@ public class SampleAPI extends AbstractVerticle {
 
 
     private void sayHello(RoutingContext rc) {
-        System.out.println("--Service");
+        System.out.println("--Service --");
         rc.response()
                 .putHeader("content-type",
                         "application/json; charset=utf-8")
-                .end( "Hello world" );
+                .end(Json.encodePrettily("HELLO"));
     }
 
     private void rateLimiter(RoutingContext rc) {
@@ -119,8 +119,8 @@ public class SampleAPI extends AbstractVerticle {
 
             RedisAPI redis = RedisAPI.api(redisClient);
             long currentTime = System.currentTimeMillis();
-            String minuteKey = apiKey + ":mn";
-            String hourlyKey = apiKey + ":hourly";
+            String minuteKey = "ratelimit:"+ apiKey + ":mn";
+            String hourlyKey = "ratelimit:"+ apiKey + ":hourly";
 
             redis.zremrangebyscore(minuteKey, "0", Long.toString(currentTime - 60000), send -> {}); // remove older values from the set
             redis.zadd(Arrays.asList(minuteKey, Long.toString(currentTime), Long.toString(currentTime) + ":1"), send -> {
@@ -133,10 +133,13 @@ public class SampleAPI extends AbstractVerticle {
                     Map message = new HashMap<>();
                     message.put("message", "You have reach the max number of calls per minute  (" + CALL_PER_MN + ")");
                     rc.response()
+                            .putHeader("X-MINUTES-REMAINED-CALL", "-1")
                             .putHeader("content-type", "application/json; charset=utf-8")
                             .setStatusCode(429)
                             .end(Json.encodePrettily(message));
                 } else {
+                    rc.response()
+                            .putHeader("X-MINUTES-REMAINED-CALL", Integer.toString(CALL_PER_MN - totalNbOfEntries) );
                     rc.next();
                 }
             });
