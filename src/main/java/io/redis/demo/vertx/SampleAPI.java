@@ -7,6 +7,7 @@ import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
+import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.redis.client.Redis;
@@ -14,11 +15,13 @@ import io.vertx.redis.client.RedisAPI;
 import io.vertx.redis.client.RedisConnection;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.Request;
+import io.vertx.redis.client.Response;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+// To run : docker run -it --rm -p 6379:6379 --name redis1 redis
 public class SampleAPI extends AbstractVerticle {
 
 
@@ -26,28 +29,18 @@ public class SampleAPI extends AbstractVerticle {
     private final static int  CALL_PER_HOUR = 40;
     private final static int  CALL_PER_DAY = 100;
 
-    RedisConnection redisClient;
+    private Redis redisClient;
 
     public static void main(String[] args) {
         Vertx vertx = Vertx.vertx();
-        vertx.deployVerticle(SampleAPI.class.getName());
+        vertx.deployVerticle(SampleAPI.class.getName())
+            .onSuccess(id -> System.out.println("Verticle started"))
+            .onFailure(System.err::println);
     }
 
     @Override
     public void start(Promise<Void> fut) {
-
-
-        // initialize Redis Connection
-        RedisOptions options = new RedisOptions();
-
-        Redis.createClient(vertx, options)
-                .connect(onConnect -> {
-                    if (onConnect.succeeded()) {
-                        redisClient = onConnect.result();
-                    }
-                });
-
-
+        redisClient = Redis.createClient(vertx, new RedisOptions());
 
         // Create a router object.
         Router router = Router.router(vertx);
@@ -61,46 +54,29 @@ public class SampleAPI extends AbstractVerticle {
                     .end("<h1>Hello from my first Vert.x 3 app</h1>");
         });
 
-
         router.get("/api/hello")
                 .handler(this::rateLimiter)
                 .handler(this::sayHello);
 
         ConfigRetriever retriever = ConfigRetriever.create(vertx);
-        retriever.getConfig(
-                config -> {
-                    if (config.failed()) {
-                        fut.fail(config.cause());
-                    } else {
-                        // Create the HTTP server and pass the
-                        // "accept" method to the request handler.
-                        vertx
-                                .createHttpServer()
-                                .requestHandler(router)
-                                .listen(
-                                        // Retrieve the port from the
-                                        // configuration, default to 8080.
-                                        config().getInteger("HTTP_PORT", 8080),
-                                        result -> {
-                                            if (result.succeeded()) {
-                                                fut.complete();
-                                            } else {
-                                                fut.fail(result.cause());
-                                            }
-                                        }
-                                );
-                    }
-                }
-        );
-    }
 
+        retriever.getConfig()
+            .map(c -> c.getInteger("HTTP_PORT", 8080))
+            .flatMap(port -> vertx
+                .createHttpServer()
+                .requestHandler(router)
+                .listen(port))
+            .<Void>mapEmpty()
+            .setHandler(fut);
+    }
 
     private void sayHello(RoutingContext rc) {
         System.out.println("--Service --");
         rc.response()
-                .putHeader("content-type",
-                        "application/json; charset=utf-8")
-                .end(Json.encodePrettily("HELLO"));
+                .putHeader("content-type", "application/json; charset=utf-8")
+                .end(new JsonObject()
+                    .put("message", "Hello from API")
+                    .encodePrettily());
     }
 
     private void rateLimiter(RoutingContext rc) {
@@ -109,14 +85,12 @@ public class SampleAPI extends AbstractVerticle {
         String apiKey = rc.request().getParam("APIKEY");
 
         if (apiKey == null || apiKey.trim().isEmpty()) {
-
-            Map message = new HashMap<>();
-            message.put("message", "Set the APIKEY parameter");
             rc.response()
-                    .putHeader("content-type",
-                            "application/json; charset=utf-8")
+                    .putHeader("content-type", "application/json; charset=utf-8")
                     .setStatusCode(401)
-                    .end(Json.encodePrettily(message));
+                    .end(new JsonObject()
+                        .put("message", "Set the APIKEY parameter")
+                        .encodePrettily());
         } else {
 
             RedisAPI redis = RedisAPI.api(redisClient);
@@ -124,30 +98,29 @@ public class SampleAPI extends AbstractVerticle {
             String minuteKey = "ratelimit:"+ apiKey + ":mn";
             String hourlyKey = "ratelimit:"+ apiKey + ":hourly";
 
-            redis.zremrangebyscore(minuteKey, "0", Long.toString(currentTime - 60000), send -> {}); // remove older values from the set
-            redis.zadd(Arrays.asList(minuteKey, Long.toString(currentTime), Long.toString(currentTime) + ":1"), send -> {
-            });
-            redis.expire(minuteKey, "61", send -> {
-            });
-            redis.zrange(Arrays.asList(minuteKey, "0", "-1"), send -> {
-                int totalNbOfEntries = send.result().size();
-                if (totalNbOfEntries > 0 && totalNbOfEntries > CALL_PER_MN) {
-                    Map message = new HashMap<>();
-                    message.put("message", "You have reach the max number of calls per minute  (" + CALL_PER_MN + ")");
-                    rc.response()
+            redis.zremrangebyscore(minuteKey, "0", Long.toString(currentTime - 60000)); // remove older values from the set
+            redis.zadd(Arrays.asList(minuteKey, Long.toString(currentTime), currentTime + ":1"));
+            redis.expire(minuteKey, "61");
+            Future<Response> result = redis.zrange(Arrays.asList(minuteKey, "0", "-1"));
+
+            result
+                .onSuccess(res -> {
+                    int totalNbOfEntries = res.size();
+                    if (totalNbOfEntries > CALL_PER_MN) {
+                        rc.response()
                             .putHeader("X-MINUTES-REMAINED-CALL", "-1")
                             .putHeader("content-type", "application/json; charset=utf-8")
                             .setStatusCode(429)
-                            .end(Json.encodePrettily(message));
-                } else {
-                    rc.response()
-                            .putHeader("X-MINUTES-REMAINED-CALL", Integer.toString(CALL_PER_MN - totalNbOfEntries) );
-                    rc.next();
-                }
-            });
-
+                            .end(new JsonObject()
+                                .put("message", "You have reach the max number of calls per minute  (" + CALL_PER_MN + ")")
+                                .encodePrettily());
+                    } else {
+                        rc.response()
+                            .putHeader("X-MINUTES-REMAINED-CALL", Integer.toString(CALL_PER_MN - totalNbOfEntries));
+                        rc.next();
+                    }
+                })
+                .onFailure(err -> rc.fail(503, err));
         }
     }
-
-
 }
