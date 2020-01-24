@@ -3,6 +3,7 @@ package io.redis.demo.vertx;
 import io.vertx.config.ConfigRetriever;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
+import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
@@ -10,6 +11,7 @@ import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisAPI;
+import io.vertx.redis.client.RedisConnection;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.Request;
 
@@ -24,7 +26,7 @@ public class SampleAPI extends AbstractVerticle {
     private final static int  CALL_PER_HOUR = 40;
     private final static int  CALL_PER_DAY = 100;
 
-    Redis redisClient;
+    RedisConnection redisClient;
 
     public static void main(String[] args) {
         Vertx vertx = Vertx.vertx();
@@ -32,7 +34,7 @@ public class SampleAPI extends AbstractVerticle {
     }
 
     @Override
-    public void start(Future fut) {
+    public void start(Promise<Void> fut) {
 
 
         // initialize Redis Connection
@@ -74,7 +76,7 @@ public class SampleAPI extends AbstractVerticle {
                         // "accept" method to the request handler.
                         vertx
                                 .createHttpServer()
-                                .requestHandler(router::accept)
+                                .requestHandler(router)
                                 .listen(
                                         // Retrieve the port from the
                                         // configuration, default to 8080.
