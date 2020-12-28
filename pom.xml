@@ -19,7 +19,7 @@
         <maven-surefire-plugin.version>2.22.1</maven-surefire-plugin.version>
         <exec-maven-plugin.version>1.5.0</exec-maven-plugin.version>
 
-        <vertx.version>4.0.0-milestone4</vertx.version>
+        <vertx.version>4.0.0</vertx.version>
         <junit-jupiter.version>5.4.0</junit-jupiter.version>
 
         <main.verticle>io.redis.demo.vertx.SampleAPI</main.verticle>

@@ -26,8 +26,6 @@ public class SampleAPI extends AbstractVerticle {
 
 
     private final static int  CALL_PER_MN = 10;
-    private final static int  CALL_PER_HOUR = 40;
-    private final static int  CALL_PER_DAY = 100;
 
     private Redis redisClient;
 
@@ -66,8 +64,7 @@ public class SampleAPI extends AbstractVerticle {
                 .createHttpServer()
                 .requestHandler(router)
                 .listen(port))
-            .<Void>mapEmpty()
-            .setHandler(fut);
+            .<Void>mapEmpty();
     }
 
     private void sayHello(RoutingContext rc) {
@@ -96,7 +93,7 @@ public class SampleAPI extends AbstractVerticle {
             RedisAPI redis = RedisAPI.api(redisClient);
             long currentTime = System.currentTimeMillis();
             String minuteKey = "ratelimit:"+ apiKey + ":mn";
-            String hourlyKey = "ratelimit:"+ apiKey + ":hourly";
+
 
             redis.zremrangebyscore(minuteKey, "0", Long.toString(currentTime - 60000)); // remove older values from the set
             redis.zadd(Arrays.asList(minuteKey, Long.toString(currentTime), currentTime + ":1"));
